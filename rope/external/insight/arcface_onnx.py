@@ -26,7 +26,7 @@ class ArcFaceONNX:
         find_mul = False
         model = onnx.load(self.model_file)
         graph = model.graph
-        for nid, node in enumerate(graph.node[:8]):
+        for node in graph.node[:8]:
             #print(nid, node.name)
             if node.name.startswith('Sub') or node.name.startswith('_minus'):
                 find_sub = True
@@ -50,9 +50,7 @@ class ArcFaceONNX:
         self.input_size = tuple(input_shape[2:4][::-1])
         self.input_shape = input_shape
         outputs = self.session.get_outputs()
-        output_names = []
-        for out in outputs:
-            output_names.append(out.name)
+        output_names = [out.name for out in outputs]
         self.input_name = input_name
         self.output_names = output_names
         assert len(self.output_names)==1
@@ -71,23 +69,20 @@ class ArcFaceONNX:
         from numpy.linalg import norm
         feat1 = feat1.ravel()
         feat2 = feat2.ravel()
-        sim = np.dot(feat1, feat2) / (norm(feat1) * norm(feat2))
-        return sim
+        return np.dot(feat1, feat2) / (norm(feat1) * norm(feat2))
 
     def get_feat(self, imgs):
         if not isinstance(imgs, list):
             imgs = [imgs]
         input_size = self.input_size
-        
+
         blob = cv2.dnn.blobFromImages(imgs, 1.0 / self.input_std, input_size,
                                       (self.input_mean, self.input_mean, self.input_mean), swapRB=True)
-        net_out = self.session.run(self.output_names, {self.input_name: blob})[0]
-        return net_out
+        return self.session.run(self.output_names, {self.input_name: blob})[0]
 
     def forward(self, batch_data):
         blob = (batch_data - self.input_mean) / self.input_std
-        net_out = self.session.run(self.output_names, {self.input_name: blob})[0]
-        return net_out
+        return self.session.run(self.output_names, {self.input_name: blob})[0]
 
 
     def estimate_norm(self, lmk, image_size=112,mode='arcface'):
@@ -104,10 +99,8 @@ class ArcFaceONNX:
         dst[:,0] += diff_x
         tform = trans.SimilarityTransform()
         tform.estimate(lmk, dst)
-        M = tform.params[0:2, :]
-        return M
+        return tform.params[0:2, :]
 
     def norm_crop(self, img, landmark, image_size=112, mode='arcface'):
         M = self.estimate_norm(landmark, image_size, mode)
-        warped = cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)
-        return warped
+        return cv2.warpAffine(img, M, (image_size, image_size), borderValue=0.0)

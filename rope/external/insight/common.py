@@ -32,15 +32,11 @@ class Face(dict):
 
     @property
     def embedding_norm(self):
-        if self.embedding is None:
-            return None
-        return l2norm(self.embedding)
+        return None if self.embedding is None else l2norm(self.embedding)
 
-    @property 
+    @property
     def normed_embedding(self):
-        if self.embedding is None:
-            return None
-        return self.embedding / self.embedding_norm
+        return None if self.embedding is None else self.embedding / self.embedding_norm
 
     @property 
     def sex(self):
