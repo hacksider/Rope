@@ -65,8 +65,7 @@ def distance2kps(points, distance, max_shape=None):
         if max_shape is not None:
             px = px.clamp(min=0, max=max_shape[1])
             py = py.clamp(min=0, max=max_shape[0])
-        preds.append(px)
-        preds.append(py)
+        preds.extend((px, py))
     return np.stack(preds, axis=-1)
 
 class RetinaFace:
@@ -96,9 +95,7 @@ class RetinaFace:
         input_name = input_cfg.name
         self.input_shape = input_shape
         outputs = self.session.get_outputs()
-        output_names = []
-        for o in outputs:
-            output_names.append(o.name)
+        output_names = [o.name for o in outputs]
         self.input_name = input_name
         self.output_names = output_names
         self.input_mean = 127.5
@@ -147,7 +144,7 @@ class RetinaFace:
         scores_list = []
         bboxes_list = []
         kpss_list = []
-        input_size = tuple(img.shape[0:2][::-1])
+        input_size = tuple(img.shape[:2][::-1])
         blob = cv2.dnn.blobFromImage(img, 1.0/self.input_std, input_size, (self.input_mean, self.input_mean, self.input_mean), swapRB=True)
         net_outs = self.session.run(self.output_names, {self.input_name : blob})
 
@@ -207,7 +204,7 @@ class RetinaFace:
     def detect(self, img, input_size = None, max_num=0, metric='default'):
         assert input_size is not None or self.input_size is not None
         input_size = self.input_size if input_size is None else input_size
-            
+
         im_ratio = float(img.shape[0]) / img.shape[1]
         model_ratio = float(input_size[1]) / input_size[0]
         if im_ratio>model_ratio:
@@ -247,13 +244,10 @@ class RetinaFace:
                 (det[:, 1] + det[:, 3]) / 2 - img_center[0]
             ])
             offset_dist_squared = np.sum(np.power(offsets, 2.0), 0)
-            if metric=='max':
-                values = area
-            else:
-                values = area - offset_dist_squared * 2.0  # some extra weight on the centering
+            values = area if metric=='max' else area - offset_dist_squared * 2.0
             bindex = np.argsort(
                 values)[::-1]  # some extra weight on the centering
-            bindex = bindex[0:max_num]
+            bindex = bindex[:max_num]
             det = det[bindex, :]
             if kpss is not None:
                 kpss = kpss[bindex, :]
@@ -295,7 +289,7 @@ def get_retinaface(name, download=False, root='~/.insightface/models', **kwargs)
         return RetinaFace(name)
     else:
         from .model_store import get_model_file
-        _file = get_model_file("retinaface_%s" % name, root=root)
+        _file = get_model_file(f"retinaface_{name}", root=root)
         return retinaface(_file)
 
 

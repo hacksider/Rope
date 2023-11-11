@@ -30,13 +30,13 @@ class VideoManager():
         self.input_size = []                # size of the inswapper.onnx inputs
         self.emap = []                      # comes from loading the inswapper model. not sure of data
         self.output_names = []              # names of the inswapper.onnx outputs    
-        self.arcface_dst = np.array( [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366], [41.5493, 92.3655], [70.7299, 92.2041]], dtype=np.float32)                 
+        self.arcface_dst = np.array( [[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366], [41.5493, 92.3655], [70.7299, 92.2041]], dtype=np.float32)
         self.GFPGAN_model = []
         self.occluder_model = []
         self.face_parsing_model = []
-        self.face_parsing_tensor = []   
+        self.face_parsing_tensor = []
         self.codeformer_model = []
-        
+
         #Video related
         self.capture = []                   # cv2 video
         self.is_video_loaded = False        # flag for video loaded state    
@@ -44,22 +44,22 @@ class VideoManager():
         self.play = False                   # flag for the play button toggle
         self.current_frame = 0              # the current frame of the video
         self.create_video = False
-        self.output_video = []       
-        self.file_name = []       
+        self.output_video = []
+        self.file_name = []
         self.vid_qual = []
-        
+
         # Play related
         # self.set_read_threads = []          # Name of threaded function
         self.frame_timer = 0.0      # used to set the framerate during playing
         self.play_frame_tracker = -1        # tracks the next frame during playing in case the threads return out of order
-        
+
         # Queues
         self.action_q = []                  # queue for sending to the coordinator
         self.frame_q = []                   # queue for frames that are ready for coordinator
         self.frame_q2 = []                  # queue for frames created by thread and ready to be added to frame_q
         self.r_frame_q = []                 # queue for frames that are requested by the GUI
         self.read_video_frame_q = []
-        
+
         # swapping related
         self.source_embedding = []          # array with indexed source embeddings
         self.swap = False                   # flag for the swap enabled toggle
@@ -87,28 +87,34 @@ class VideoManager():
         self.timer = []
         self.fps_average = []
         self.total_thread_time = 0.0
-        
+
         self.rec_thread = []
-        
+
         self.process_q =    {
                             "Thread":                   [],
                             "FrameNumber":              [],
                             "ProcessedFrame":           [],
                             "Status":                   'clear',
                             "ThreadTime":               []
-                            }   
+                            }
         self.process_qs = []
         self.rec_q =    {
                             "Thread":                   [],
                             "FrameNumber":              [],
                             "Status":                   'clear'
-                            }   
+                            }
         self.rec_qs = []
 
         self.clip_transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), transforms.Resize((256, 256))])
 
-        self.arcface_dst_max = []
-        self.arcface_dst_max.append( math.sqrt(( self.arcface_dst[0][0]- self.arcface_dst[1][0])*( self.arcface_dst[0][0]- self.arcface_dst[1][0]) + ( self.arcface_dst[0][1]- self.arcface_dst[1][1])*( self.arcface_dst[0][1]- self.arcface_dst[1][1])) )
+        self.arcface_dst_max = [
+            math.sqrt(
+                (self.arcface_dst[0][0] - self.arcface_dst[1][0])
+                * (self.arcface_dst[0][0] - self.arcface_dst[1][0])
+                + (self.arcface_dst[0][1] - self.arcface_dst[1][1])
+                * (self.arcface_dst[0][1] - self.arcface_dst[1][1])
+            )
+        ]
         self.arcface_dst_max.append( math.sqrt(( self.arcface_dst[1][0]- self.arcface_dst[4][0])*( self.arcface_dst[1][0]- self.arcface_dst[4][0]) + ( self.arcface_dst[1][1]- self.arcface_dst[4][1])*( self.arcface_dst[1][1]- self.arcface_dst[4][1])) )
         self.arcface_dst_max.append( math.sqrt(( self.arcface_dst[3][0]- self.arcface_dst[4][0])*( self.arcface_dst[3][0]- self.arcface_dst[4][0]) + ( self.arcface_dst[3][1]- self.arcface_dst[4][1])*( self.arcface_dst[3][1]- self.arcface_dst[4][1])) )
         self.arcface_dst_max.append( math.sqrt(( self.arcface_dst[0][0]- self.arcface_dst[3][0])*( self.arcface_dst[0][0]- self.arcface_dst[3][0]) + ( self.arcface_dst[0][1]- self.arcface_dst[3][1])*( self.arcface_dst[0][1]- self.arcface_dst[3][1])) )
@@ -190,82 +196,92 @@ class VideoManager():
     
 
     def get_requested_video_frame(self, frame):    
-        if self.is_video_loaded == True:
-            if self.play == True:            
-                self.play_video("stop")
-                self.process_qs = []
-            self.current_frame = int(frame)
-            self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-            success, target_image = self.capture.read()
-            self.current_frame += 1
-            if success:
-                # target_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) 
-                if not self.swap:   
-                    temp = [target_image, self.current_frame]
-                else:  
-                    temp = [self.swap_video(target_image), self.current_frame]
-                temp[0] = cv2.cvtColor(temp[0], cv2.COLOR_BGR2RGB) 
-                self.r_frame_q.append(temp)     
+        if self.is_video_loaded != True:
+            return
+        if self.play == True:            
+            self.play_video("stop")
+            self.process_qs = []
+        self.current_frame = int(frame)
+        self.capture.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
+        success, target_image = self.capture.read()
+        self.current_frame += 1
+        if success:
+            # target_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) 
+            if not self.swap:   
+                temp = [target_image, self.current_frame]
+            else:  
+                temp = [self.swap_video(target_image), self.current_frame]
+            temp[0] = cv2.cvtColor(temp[0], cv2.COLOR_BGR2RGB) 
+            self.r_frame_q.append(temp)     
            
     def play_video(self, command):        
         if command == "play":
             self.play = True
-            self.play_frame_tracker = self.current_frame   
+            self.play_frame_tracker = self.current_frame
             self.fps_average = []            
-            
+
             self.process_qs = []
-            for i in range(self.num_threads):
-                    new_process_q = self.process_q.copy()
-                    self.process_qs.append(new_process_q)
-                                                
+            for _ in range(self.num_threads):
+                new_process_q = self.process_q.copy()
+                self.process_qs.append(new_process_q)
+
         if command == "stop":
             self.play = False
             self.add_action("stop_play", True)
-            
+
 
         if command == "record":
             self.record = True
             self.play = True
-            self.play_frame_tracker = self.current_frame 
+            self.play_frame_tracker = self.current_frame
             self.total_thread_time = 0.0
 
             self.process_qs = []
-            
-            for i in range(self.num_threads):
-                    new_process_q = self.process_q.copy()
-                    self.process_qs.append(new_process_q)
-                    self.rec_qs.append(new_process_q)
+
+            for _ in range(self.num_threads):
+                new_process_q = self.process_q.copy()
+                self.process_qs.append(new_process_q)
+                self.rec_qs.append(new_process_q)
             self.rec_qs = []
-            for i in range(self.num_threads):
-                    new_rec_q = self.rec_q.copy()
-                    self.rec_qs.append(new_rec_q)
-                    self.rec_qs.append(new_rec_q)
+            for _ in range(self.num_threads):
+                new_rec_q = self.rec_q.copy()
+                self.rec_qs.append(new_rec_q)
+                self.rec_qs.append(new_rec_q)
            # Initialize
             self.timer = time.time()
             frame_width = int(self.capture.get(3))
             frame_height = int(self.capture.get(4))
 
             self.start_time = float(self.capture.get(cv2.CAP_PROP_POS_FRAMES) / float(self.fps))            
-            
-            self.file_name = os.path.splitext(os.path.basename(self.target_video))
-            base_filename =  self.file_name[0]+"_"+str(time.time())[:10]
-            self.output = os.path.join(self.saved_video_path, base_filename)
-            self.temp_file = self.output+"_temp"+self.file_name[1]  
 
-            args =  ["ffmpeg", 
-                    '-hide_banner',
-                    '-loglevel',    'error',
-                    "-an",       
-                    "-r",           str(self.fps),
-                    "-i",           "pipe:",
-                    # '-g',           '25',
-                    "-vf",          "format=yuvj420p",
-                    "-c:v",         "libx264",
-                    "-crf",         str(self.vid_qual),
-                    "-r",           str(self.fps),
-                    "-s",           str(frame_width)+"x"+str(frame_height),
-                    self.temp_file]  
-            
+            self.file_name = os.path.splitext(os.path.basename(self.target_video))
+            base_filename = f"{self.file_name[0]}_{str(time.time())[:10]}"
+            self.output = os.path.join(self.saved_video_path, base_filename)
+            self.temp_file = f"{self.output}_temp{self.file_name[1]}"  
+
+            args = [
+                "ffmpeg",
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                "-an",
+                "-r",
+                str(self.fps),
+                "-i",
+                "pipe:",
+                "-vf",
+                "format=yuvj420p",
+                "-c:v",
+                "libx264",
+                "-crf",
+                str(self.vid_qual),
+                "-r",
+                str(self.fps),
+                "-s",
+                f"{frame_width}x{frame_height}",
+                self.temp_file,
+            ]  
+
             self.sp = subprocess.Popen(args, stdin=subprocess.PIPE)
             
             # exists = False

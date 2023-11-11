@@ -49,7 +49,7 @@ def forward_multihead_attention(x, b, with_aff=False, attn_mask=None):
         attn_mask_type, attn_mask = attn_mask
         n_heads = attn_output_weights.size(0) // attn_mask.size(0)
         attn_mask = attn_mask.repeat(n_heads, 1)
-        
+
         if attn_mask_type == 'cls_token':
             # the mask only affects similarities compared to the readout-token.
             attn_output_weights[:, 0, 1:] = attn_output_weights[:, 0, 1:] * attn_mask[None,...]
@@ -58,8 +58,8 @@ def forward_multihead_attention(x, b, with_aff=False, attn_mask=None):
         if attn_mask_type == 'all':
             # print(attn_output_weights.shape, attn_mask[:, None].shape)
             attn_output_weights[:, 1:, 1:] = attn_output_weights[:, 1:, 1:] * attn_mask[:, None]
-        
-    
+
+
     attn_output_weights = torch.softmax(attn_output_weights, dim=-1)
 
     attn_output = torch.bmm(attn_output_weights, v)
@@ -69,10 +69,7 @@ def forward_multihead_attention(x, b, with_aff=False, attn_mask=None):
     x = x + attn_output
     x = x + b.mlp(b.ln_2(x))
 
-    if with_aff:
-        return x, attn_output_weights
-    else:
-        return x
+    return (x, attn_output_weights) if with_aff else x
 
 
 class CLIPDenseBase(nn.Module):
@@ -158,12 +155,14 @@ class CLIPDenseBase(nn.Module):
                 
                 if mask is not None:
                     mask_layer, mask_type, mask_tensor = mask
-                    if mask_layer == i or mask_layer == 'all':
+                    if mask_layer in [i, 'all']:
                         # import ipdb; ipdb.set_trace()
                         size = int(math.sqrt(x.shape[0] - 1))
-                        
-                        attn_mask = (mask_type, nnf.interpolate(mask_tensor.unsqueeze(1).float(), (size, size)).view(mask_tensor.shape[0], size * size))
-                        
+
+                        attn_mask = mask_type, nnf.interpolate(
+                            mask_tensor.unsqueeze(1).float(), (size, size)
+                        ).view(mask_tensor.shape[0], size**2)
+
                     else:
                         attn_mask = None
                 else:
@@ -182,7 +181,7 @@ class CLIPDenseBase(nn.Module):
                 if len(extract_layers) > 0 and i == max(extract_layers) and skip:
                     print('early skip')
                     break
-                
+
             x = x.permute(1, 0, 2)  # LND -> NLD
             x = self.model.ln_post(x[:, 0, :])
 
@@ -230,17 +229,13 @@ class CLIPDenseBase(nn.Module):
         if type(conditional) in {list, tuple}:
             text_tokens = clip.tokenize(conditional).to(dev)
             cond = self.clip_model.encode_text(text_tokens)
+        elif conditional in self.precomputed_prompts:
+            cond = self.precomputed_prompts[conditional].float().to(dev)
         else:
-            if conditional in self.precomputed_prompts:
-                cond = self.precomputed_prompts[conditional].float().to(dev)
-            else:
-                text_tokens = clip.tokenize([conditional]).to(dev)
-                cond = self.clip_model.encode_text(text_tokens)[0]
-        
-        if self.shift_vector is not None:
-            return cond + self.shift_vector
-        else:
-            return cond
+            text_tokens = clip.tokenize([conditional]).to(dev)
+            cond = self.clip_model.encode_text(text_tokens)[0]
+
+        return cond + self.shift_vector if self.shift_vector is not None else cond
 
 
 def clip_load_untrained(version):
@@ -260,7 +255,13 @@ def clip_load_untrained(version):
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
+    transformer_layers = len(
+        {
+            k.split(".")[2]
+            for k in state_dict
+            if k.startswith("transformer.resblocks")
+        }
+    )
 
     return CLIP(embed_dim, image_resolution, vision_layers, vision_width, vision_patch_size, 
         context_length, vocab_size, transformer_width, transformer_heads, transformer_layers)    
@@ -369,15 +370,11 @@ class CLIPDensePredT(CLIPDenseBase):
         a = None
         for i, (activation, block, reduce) in enumerate(zip(_activations, self.blocks, self.reduces)):
             
-            if a is not None:
-                a = reduce(activation) + a
-            else:
-                a = reduce(activation)
-
+            a = reduce(activation) + a if a is not None else reduce(activation)
             if i == self.cond_layer:
                 if self.reduce_cond is not None:
                     cond = self.reduce_cond(cond)
-                
+
                 a = self.film_mul(cond) * a + self.film_add(cond)
 
             a = block(a)
@@ -493,10 +490,7 @@ class CLIPDenseBaseline(CLIPDenseBase):
         a = a.view(bs, a.shape[1], size, size)
         a = self.trans_conv(a)
 
-        if return_features:
-            return a, visual_q, cond, activations
-        else:
-            return a,
+        return (a, visual_q, cond, activations) if return_features else (a, )
 
 
 class CLIPSegMultiLabel(nn.Module):
